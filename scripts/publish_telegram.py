@@ -68,7 +68,7 @@ def find_target(rows):
     return None, None
 
 
-def extract_telegram_text(content, post_num):
+def get_post_section(content, post_num):
     section_re = re.compile(
         r"^###\s*ПОСТ\s+" + str(post_num) + r"\b.*?\n(.*?)(?=\n###\s*ПОСТ|\n##\s|\Z)",
         re.S | re.M,
@@ -76,9 +76,24 @@ def extract_telegram_text(content, post_num):
     m = section_re.search(content)
     if not m:
         raise RuntimeError(f"Не найден раздел ПОСТ {post_num} в {CONTENT_NAME}")
-    section = m.group(1)
+    return m.group(1)
 
-    tg_re = re.compile(r"\*\*Telegram\*\*\s*\n\n(.*?)\n\n\*\*ВКонтакте\*\*", re.S)
+
+def extract_telegram_html(section):
+    """Ищет вручную оформленную HTML-версию поста (готовую к отправке как есть,
+    parse_mode=HTML). Возвращает None, если для этого поста её нет."""
+    html_re = re.compile(
+        r"\*\*Telegram HTML\*\*.*?\n\n(.*?)\n\n\*\*ВКонтакте\*\*", re.S
+    )
+    m = html_re.search(section)
+    if not m:
+        return None
+    return m.group(1).strip()
+
+
+def extract_telegram_text(section, post_num):
+    """Механическая конвертация markdown-версии поста (fallback, если HTML-версии нет)."""
+    tg_re = re.compile(r"\*\*Telegram\*\*\s*\n\n(.*?)\n\n\*\*(?:Telegram HTML|ВКонтакте)\*\*", re.S)
     m2 = tg_re.search(section)
     if not m2:
         raise RuntimeError(f"Не найден подраздел Telegram для ПОСТ {post_num}")
@@ -146,13 +161,21 @@ def main():
     post_num = post_num_match.group(1)
 
     content_text = read(content_path)
-    tg_text = extract_telegram_text(content_text, post_num)
+    section = get_post_section(content_text, post_num)
 
-    ok, resp = send_telegram(tg_text, parse_mode="Markdown")
+    html_text = extract_telegram_html(section)
+    if html_text is not None:
+        print(f"Найдена готовая HTML-версия для ПОСТ {post_num}, отправляю как есть.")
+        tg_text, parse_mode = html_text, "HTML"
+    else:
+        print(f"HTML-версии для ПОСТ {post_num} нет, использую автоконвертацию из Markdown.")
+        tg_text, parse_mode = extract_telegram_text(section, post_num), "Markdown"
+
+    ok, resp = send_telegram(tg_text, parse_mode=parse_mode)
     if not ok:
         err_desc = resp.get("description", "") if isinstance(resp, dict) else str(resp)
         if "parse" in err_desc.lower() or "entit" in err_desc.lower():
-            print(f"Markdown не распарсился ({err_desc}), повторяю без parse_mode…")
+            print(f"{parse_mode} не распарсился ({err_desc}), повторяю без parse_mode…")
             ok, resp = send_telegram(tg_text, parse_mode=None)
         if not ok:
             print(f"::error::Публикация в Telegram не удалась: {resp}")
