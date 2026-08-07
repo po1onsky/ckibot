@@ -1,0 +1,33 @@
+name: ЦКИ — автопостинг в Telegram
+
+on:
+  schedule:
+    - cron: '0 7 * * 1,3,5'  # пн/ср/пт, 10:00 МСК
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish next queued post
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python3 scripts/publish_telegram.py
+
+      - name: Commit updated queue status
+        run: |
+          if ! git diff --quiet -- "Очередь_публикаций_ТГ.md"; then
+            git config user.name "ЦКИ Автопостинг"
+            git config user.email "bot@ckibot.local"
+            git add "Очередь_публикаций_ТГ.md"
+            git commit -m "Опубликован пост (авто, $(date -u +%Y-%m-%d))"
+            git push
+          else
+            echo "Нет изменений для коммита (публикация пропущена или файл не менялся)."
+          fi
