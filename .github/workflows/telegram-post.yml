@@ -22,10 +22,10 @@ jobs:
 
       - name: Commit updated queue status
         run: |
-          if ! git diff --quiet -- "Очередь_публикаций_ТГ.md"; then
+          git add -A
+          if ! git diff --cached --quiet; then
             git config user.name "ЦКИ Автопостинг"
             git config user.email "bot@ckibot.local"
-            git add "Очередь_публикаций_ТГ.md"
             git commit -m "Опубликован пост (авто, $(date -u +%Y-%m-%d))"
             git push
           else
