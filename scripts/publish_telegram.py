@@ -6,17 +6,30 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime, timezone
 
-QUEUE_PATH = "Очередь_публикаций_ТГ.md"
-CONTENT_PATH = "Контент_ТГ_ВК_ЦКИ.md"
+QUEUE_NAME = "Очередь_публикаций_ТГ.md"
+CONTENT_NAME = "Контент_ТГ_ВК_ЦКИ.md"
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = "@cifrovye_dokazatelstva"
 
 BLOCKED_MARKERS = ("⛔ нужны данные", "⛔ нужно написать", "⛔ пишется по факту события")
+
+
+def resolve_path(expected_name, directory="."):
+    """Находит файл в директории, устойчиво к NFC/NFD различиям в юникод-именах
+    (macOS обычно хранит составные кириллические имена в NFD, Linux-раннер — нет)."""
+    if os.path.exists(expected_name):
+        return expected_name
+    target_nfc = unicodedata.normalize("NFC", expected_name)
+    for entry in os.listdir(directory):
+        if unicodedata.normalize("NFC", entry) == target_nfc:
+            return os.path.join(directory, entry) if directory != "." else entry
+    raise FileNotFoundError(expected_name)
 
 
 def read(path):
@@ -62,7 +75,7 @@ def extract_telegram_text(content, post_num):
     )
     m = section_re.search(content)
     if not m:
-        raise RuntimeError(f"Не найден раздел ПОСТ {post_num} в {CONTENT_PATH}")
+        raise RuntimeError(f"Не найден раздел ПОСТ {post_num} в {CONTENT_NAME}")
     section = m.group(1)
 
     tg_re = re.compile(r"\*\*Telegram\*\*\s*\n\n(.*?)\n\n\*\*ВКонтакте\*\*", re.S)
@@ -110,7 +123,10 @@ def main():
         print("::error::TELEGRAM_BOT_TOKEN не задан (добавьте секрет в настройках репозитория)")
         sys.exit(1)
 
-    queue_text = read(QUEUE_PATH)
+    queue_path = resolve_path(QUEUE_NAME)
+    content_path = resolve_path(CONTENT_NAME)
+
+    queue_text = read(queue_path)
     rows = parse_queue_rows(queue_text)
     target, blocker = find_target(rows)
 
@@ -129,7 +145,7 @@ def main():
         sys.exit(1)
     post_num = post_num_match.group(1)
 
-    content_text = read(CONTENT_PATH)
+    content_text = read(content_path)
     tg_text = extract_telegram_text(content_text, post_num)
 
     ok, resp = send_telegram(tg_text, parse_mode="Markdown")
@@ -161,7 +177,7 @@ def main():
     if not replaced:
         print("::warning::Не удалось найти строку для обновления статуса в файле очереди")
     else:
-        write(QUEUE_PATH, "\n".join(new_lines) + "\n")
+        write(queue_path, "\n".join(new_lines) + "\n")
         print(f"Статус обновлён: {new_status}")
 
 
